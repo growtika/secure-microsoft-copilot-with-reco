@@ -1,0 +1,127 @@
+# Copilot Threat Detection Policies
+# Deploy in Preview mode during pilot, then switch to On for production
+
+policies:
+
+  - name: "Copilot Bulk Data Access"
+    description: "Detect when a user accesses an unusually high volume of files via Copilot"
+    severity: high
+    mode: preview  # Change to 'on' after pilot
+    trigger:
+      event: copilot_file_access
+      threshold: 50
+      window: 1h
+    conditions:
+      - file_count > baseline_average * 3
+      - unique_sites > 5
+    actions:
+      - type: alert
+        destination: soc_team
+      - type: restrict
+        target: copilot_access
+        duration: 24h
+
+  - name: "Copilot Sensitive Content Surfacing"
+    description: "Flag when Copilot responses reference files with high sensitivity labels"
+    severity: high
+    mode: preview
+    trigger:
+      event: copilot_response_generated
+    conditions:
+      - source_file_label in [Confidential, Highly Confidential]
+      - user_clearance_level < file_sensitivity_level
+    actions:
+      - type: alert
+        destination: soc_team
+      - type: log
+        detail_level: full
+
+  - name: "Copilot Anomalous Usage Pattern"
+    description: "Detect deviations from normal Copilot interaction patterns"
+    severity: medium
+    mode: preview
+    trigger:
+      event: copilot_interaction
+    conditions:
+      - daily_query_count > baseline_p95
+      - off_hours_usage == true
+      - new_topic_categories > 3
+    actions:
+      - type: alert
+        destination: security_review
+      - type: flag
+        for: manual_review
+
+  - name: "Copilot Cross-Boundary Access"
+    description: "Monitor attempts to discover data across tenant boundaries"
+    severity: critical
+    mode: on
+    trigger:
+      event: copilot_query
+    conditions:
+      - target_scope == cross_tenant
+      - guest_user == true
+    actions:
+      - type: block
+        immediate: true
+      - type: alert
+        destination: soc_team
+        priority: p1
+      - type: incident
+        auto_create: true
+
+  - name: "Copilot Data Exfiltration Attempt"
+    description: "Detect patterns suggesting data exfiltration via Copilot"
+    severity: critical
+    mode: on
+    trigger:
+      event: copilot_interaction
+    conditions:
+      - copy_paste_volume > baseline * 5
+      - external_share_attempt == true
+      - session_duration > 2h
+    actions:
+      - type: block
+        immediate: true
+      - type: alert
+        destination: soc_team
+        priority: p1
+
+  - name: "Copilot Usage by Departing Employee"
+    description: "Alert when users in departure workflow use Copilot"
+    severity: high
+    mode: on
+    trigger:
+      event: copilot_interaction
+    conditions:
+      - user_lifecycle_status == departing
+    actions:
+      - type: alert
+        destination: hr_security
+      - type: restrict
+        target: copilot_access
+
+alert_routing:
+  soc_team:
+    channels:
+      - email: soc@company.com
+      - siem: sentinel
+      - slack: "#security-alerts"
+    sla:
+      critical: 15m
+      high: 4h
+      medium: 24h
+
+  security_review:
+    channels:
+      - email: security-review@company.com
+    sla:
+      medium: 24h
+      low: 7d
+
+  hr_security:
+    channels:
+      - email: hr-security@company.com
+      - slack: "#hr-security"
+    sla:
+      high: 4h

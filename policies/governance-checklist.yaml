@@ -1,0 +1,79 @@
+# Microsoft Copilot Ongoing Governance Checklist
+
+governance:
+
+  weekly:
+    - task: "Review Copilot threat detection alerts"
+      owner: SOC Team
+      tool: "Reco → Threat Detection → Alerts"
+    - task: "Check for new high-risk user flags"
+      owner: Identity Team
+      tool: "Reco → Identities → Users"
+    - task: "Monitor Copilot usage anomalies"
+      owner: SOC Team
+      tool: "Reco → Threat Detection → Dashboard"
+
+  monthly:
+    - task: "Run permission audit across SharePoint, OneDrive, Teams"
+      owner: Security Engineering
+      tool: "scripts/permission_audit.py"
+    - task: "Review connected AI app scopes for drift"
+      owner: Security Engineering
+      tool: "Reco → AI Governance → Connected AI Apps"
+    - task: "Validate Conditional Access policies are enforced"
+      owner: Identity Team
+      tool: "Microsoft Entra ID → Conditional Access"
+    - task: "Review and update sensitivity labels coverage"
+      owner: Data Governance
+      tool: "Microsoft Purview → Information Protection"
+
+  quarterly:
+    - task: "Full posture check reassessment"
+      owner: Security Architecture
+      tool: "scripts/posture_check_validator.py"
+    - task: "Review and update detection policies"
+      owner: SOC Team
+      tool: "Reco → Threat Detection → Policy Center"
+    - task: "Audit external sharing configurations"
+      owner: Security Engineering
+      tool: "SharePoint Admin Center → Sharing"
+    - task: "Review Copilot license assignments against user risk profiles"
+      owner: Identity Team
+      tool: "Microsoft 365 Admin Center → Licenses"
+    - task: "Update compliance documentation"
+      owner: GRC Team
+      tool: "Compliance documentation system"
+
+  annually:
+    - task: "Comprehensive Copilot security review"
+      owner: CISO
+      tool: "All governance tools"
+    - task: "Update governance policies and procedures"
+      owner: Security Architecture
+      tool: "Policy management system"
+    - task: "Benchmark against updated CIS and ISO standards"
+      owner: GRC Team
+      tool: "CIS Benchmark tools"
+    - task: "Executive reporting on AI security posture"
+      owner: CISO
+      tool: "Reporting dashboard"
+
+  metrics:
+    - name: "Posture check pass rate"
+      target: "100% HIGH, 90%+ MEDIUM"
+      frequency: weekly
+    - name: "Overshared sensitive files"
+      target: "0 Critical, <10 High"
+      frequency: monthly
+    - name: "High-risk users with Copilot"
+      target: "0"
+      frequency: daily
+    - name: "Connected app scope violations"
+      target: "<5"
+      frequency: weekly
+    - name: "Detection policy alert volume"
+      target: "Trending downward"
+      frequency: monthly
+    - name: "Mean time to remediate alerts"
+      target: "<4 hours (Critical)"
+      frequency: monthly

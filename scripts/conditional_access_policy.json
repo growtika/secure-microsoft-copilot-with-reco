@@ -1,0 +1,40 @@
+{
+  "displayName": "Block Copilot for High-Risk Users",
+  "description": "Prevents high-risk users and departing employees from accessing Microsoft 365 Copilot. This policy should be enforced before Copilot rollout.",
+  "state": "enabled",
+  "conditions": {
+    "users": {
+      "includeGroups": [
+        "<high-risk-users-dynamic-group-id>",
+        "<departing-employees-group-id>"
+      ],
+      "excludeGroups": [
+        "<copilot-security-exceptions-group-id>"
+      ]
+    },
+    "applications": {
+      "includeApplications": [
+        "Microsoft 365 Copilot"
+      ]
+    },
+    "userRiskLevels": [
+      "high"
+    ],
+    "signInRiskLevels": [
+      "high",
+      "medium"
+    ],
+    "platforms": {
+      "includePlatforms": [
+        "all"
+      ]
+    }
+  },
+  "grantControls": {
+    "operator": "OR",
+    "builtInControls": [
+      "block"
+    ]
+  },
+  "sessionControls": {}
+}
