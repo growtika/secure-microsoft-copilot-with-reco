@@ -475,7 +475,8 @@ secure-microsoft-copilot-with-reco/
 │   ├── step-3-block-high-risk-users.md          # Identity risk & Conditional Access
 │   ├── step-4-detect-risky-ai-usage.md          # Detection policies & alert triage
 │   ├── step-5-monitor-scope-drift.md            # Plugin scope monitoring
-│   └── ongoing-governance.md                    # Cadence & metrics
+│   ├── ongoing-governance.md                    # Cadence & metrics
+│   └── native-purview-controls.md               # Complementary Microsoft native controls
 │
 ├── scripts/
 │   ├── permission_audit.py                      # Audit M365 permissions for Copilot readiness
@@ -508,6 +509,51 @@ python scripts/posture_check_validator.py --output posture.json
 # 3. Monitor scope drift
 python scripts/scope_drift_monitor.py --output drift.json
 ```
+
+## Complementary: Native Microsoft Purview Copilot Controls
+
+This guide focuses on securing Copilot through Reco's AI governance layer. Microsoft has also been rolling out native controls within Purview that work alongside third-party solutions:
+
+```mermaid
+graph TD
+    subgraph "Microsoft Native Controls"
+        RSS[Restricted SharePoint Search<br/><i>Limits Copilot to curated<br/>list of allowed sites</i>]
+        SAM[SharePoint Advanced Management<br/><i>Site-level access governance<br/>and oversharing reports</i>]
+        DFM[Data Access Governance Reports<br/><i>Identifies overshared content<br/>across tenant</i>]
+        TPC[Topic-Level Permission Controls<br/><i>Restrict Copilot from surfacing<br/>specific content categories</i>]
+    end
+
+    subgraph "Reco Security Layer"
+        RPC[AI Posture Checks<br/><i>Cross-platform validation</i>]
+        RTD[Threat Detection<br/><i>Behavioral anomaly detection</i>]
+        RSM[Scope Drift Monitoring<br/><i>Plugin permission tracking</i>]
+        RID[Identity Risk Analysis<br/><i>Dynamic user classification</i>]
+    end
+
+    RSS & SAM & DFM & TPC -->|Reduce attack surface| CP[Microsoft Copilot]
+    CP -->|Monitor & detect| RPC & RTD & RSM & RID
+
+    style RSS fill:#0078d4,color:#fff
+    style SAM fill:#0078d4,color:#fff
+    style DFM fill:#0078d4,color:#fff
+    style TPC fill:#0078d4,color:#fff
+    style RPC fill:#00d4aa,color:#000
+    style RTD fill:#00d4aa,color:#000
+    style RSM fill:#00d4aa,color:#000
+    style RID fill:#00d4aa,color:#000
+    style CP fill:#5f27cd,color:#fff
+```
+
+| Native Control | What It Does | Complements |
+|---------------|-------------|-------------|
+| **Restricted SharePoint Search** | Limits which SharePoint sites Copilot can index and surface content from. Acts as allowlist for Copilot data access. | Step 1 — reduces the blast radius of permission debt by restricting Copilot's searchable scope |
+| **SharePoint Advanced Management** | Provides oversharing reports, site lifecycle policies, and access governance at the site collection level. | Step 1 — native tooling for identifying and remediating permission sprawl |
+| **Data Access Governance Reports** | Identifies content shared broadly (org-wide, external, anonymous) across the tenant. | Step 1 — Microsoft-native equivalent of the permission audit |
+| **Topic-Level Permission Controls** | Restricts Copilot from surfacing content in specific topics or sensitivity categories. | Step 2 — extends sensitivity label enforcement into Copilot's response generation |
+
+> **How they work together:** Native Purview controls reduce the attack surface by limiting *what* Copilot can access. Reco adds the detection, identity risk analysis, and continuous monitoring layer to catch *how* that access is being used — and to flag misuse that native controls alone won't detect.
+
+---
 
 ## Key Takeaway
 
