@@ -1,5 +1,7 @@
 # Ongoing Governance
 
+[← Step 5](step-5-monitor-scope-drift.md) | [Back to Overview](../README.md)
+
 ## Overview
 
 Securing Microsoft Copilot is not a one-time project. It requires continuous governance to maintain the security posture established during initial deployment.

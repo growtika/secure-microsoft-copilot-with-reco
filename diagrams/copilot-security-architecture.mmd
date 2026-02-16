@@ -1,0 +1,77 @@
+%% Copilot Security Architecture — Full System View
+%% Shows the relationship between M365 services, Copilot, and Reco security controls
+
+graph TD
+    subgraph "End Users"
+        EU1[Standard User]
+        EU2[Admin User]
+        EU3[Guest User]
+        EU4[Departing Employee]
+    end
+
+    subgraph "Access Control Layer"
+        CA[Microsoft Entra ID<br/>Conditional Access]
+        MFA[Multi-Factor<br/>Authentication]
+        DC[Device Compliance<br/>Check]
+    end
+
+    subgraph "Microsoft 365 Data Layer"
+        SP[SharePoint Online<br/>Sites, Lists, Docs]
+        OD[OneDrive for Business<br/>Personal Files]
+        TM[Microsoft Teams<br/>Chats, Channels, Files]
+        EX[Exchange Online<br/>Email, Calendar]
+        LP[Microsoft Loop<br/>Workspaces]
+    end
+
+    subgraph "AI Processing Layer"
+        PE[M365 Permission Engine<br/>Effective Access Calculation]
+        CP[Microsoft Copilot<br/>LLM + Grounding]
+        PLG[Connected Plugins<br/>Third-party Integrations]
+    end
+
+    subgraph "Security & Compliance Layer"
+        DLP[Microsoft Purview DLP<br/>Data Loss Prevention]
+        SL[Sensitivity Labels<br/>Classification Engine]
+        UAL[Unified Audit Log<br/>Event Capture]
+    end
+
+    subgraph "Reco Security Platform"
+        RPC[AI Posture Checks<br/>6 Pre-deployment Gates]
+        RID[Identity Risk Analysis<br/>User Classification]
+        RTD[Threat Detection<br/>Policy Engine]
+        RSM[Scope Drift Monitor<br/>Connected App Audit]
+        RGV[Governance Automation<br/>Cadence Enforcement]
+    end
+
+    EU1 & EU2 & EU3 & EU4 --> CA
+    CA --> MFA --> DC
+    DC -->|Compliant| PE
+    DC -->|Non-compliant| BLOCK[Access Denied]
+
+    SP & OD & TM & EX & LP --> PE
+    PE --> CP
+    PLG --> CP
+    CP --> DLP
+    DLP --> SL
+    SL -->|Clean| RESP[Response Delivered]
+    SL -->|Violation| BLOCKED[Content Blocked]
+
+    CP --> UAL
+    UAL --> RTD
+    CA --> RPC
+    CA --> RID
+    PLG --> RSM
+    RTD & RSM & RPC & RID --> RGV
+
+    style CP fill:#0078d4,color:#fff
+    style PE fill:#ffd93d,color:#000
+    style BLOCK fill:#d63031,color:#fff
+    style BLOCKED fill:#d63031,color:#fff
+    style RESP fill:#00b894,color:#fff
+    style RPC fill:#00d4aa,color:#000
+    style RID fill:#00d4aa,color:#000
+    style RTD fill:#00d4aa,color:#000
+    style RSM fill:#00d4aa,color:#000
+    style RGV fill:#00d4aa,color:#000
+    style EU4 fill:#e17055,color:#fff
+    style EU3 fill:#fdcb6e,color:#000

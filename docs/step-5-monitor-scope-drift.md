@@ -1,5 +1,7 @@
 # Step 5: Monitor Permission Scope Drift
 
+[← Step 4](step-4-detect-risky-ai-usage.md) | [Back to Overview](../README.md) | [Governance →](ongoing-governance.md)
+
 ## Overview
 
 Over time, Copilot's effective access can expand as plugins are connected, integrations evolve, and permission scopes change. What begins as a tightly controlled deployment can drift into broader data access if connected apps and delegated permissions are not reviewed continuously.
@@ -83,6 +85,46 @@ Apps that haven't been used in 90+ days should be reviewed for removal:
 2. Confirm with app owners that the integration is no longer needed
 3. Revoke all permissions
 4. Remove the app registration if appropriate
+
+## Scope Drift Detection Flow
+
+```mermaid
+graph TD
+    BASELINE[Establish scope baseline<br/><i>Day 1 of Copilot deployment</i>] --> MONITOR[Continuous monitoring<br/><i>Reco AI Governance</i>]
+
+    MONITOR --> CHECK{Scope change<br/>detected?}
+
+    CHECK -->|No change| MONITOR
+    CHECK -->|New plugin installed| EVAL1[Evaluate new plugin scopes]
+    CHECK -->|Existing app scope expanded| EVAL2[Compare against baseline]
+    CHECK -->|Admin consent granted| EVAL3[Review admin consent scope]
+    CHECK -->|App inactive 90+ days| EVAL4[Flag for removal review]
+
+    EVAL1 --> RISK{Risk level of<br/>new scopes?}
+    EVAL2 --> RISK
+    EVAL3 --> RISK
+
+    RISK -->|Critical / High| ALERT[Alert security team<br/>Immediate review]
+    RISK -->|Medium| QUEUE[Add to weekly<br/>review queue]
+    RISK -->|Low| LOG[Log and continue<br/>monitoring]
+
+    ALERT --> ACTION{Scopes<br/>justified?}
+    ACTION -->|Yes| APPROVE[Approve and update<br/>baseline]
+    ACTION -->|No| REVOKE[Revoke excessive<br/>scopes]
+
+    EVAL4 --> REMOVE{App still<br/>needed?}
+    REMOVE -->|Yes| KEEP[Keep but review<br/>quarterly]
+    REMOVE -->|No| DELETE[Remove app<br/>registration]
+
+    APPROVE & REVOKE & LOG --> MONITOR
+    KEEP & DELETE --> MONITOR
+
+    style BASELINE fill:#0984e3,color:#fff
+    style ALERT fill:#d63031,color:#fff
+    style REVOKE fill:#e17055,color:#fff
+    style DELETE fill:#636e72,color:#fff
+    style APPROVE fill:#00b894,color:#fff
+```
 
 ## Next Step
 

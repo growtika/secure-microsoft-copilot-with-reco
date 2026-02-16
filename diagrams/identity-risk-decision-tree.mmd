@@ -1,0 +1,46 @@
+%% Identity Risk Decision Tree for Copilot Access
+%% Determines whether a user should receive Copilot based on risk signals
+
+graph TD
+    START[User requests<br/>Copilot access] --> Q1{Is user in<br/>departure workflow?}
+
+    Q1 -->|Yes| BLOCK1[🚫 Block Copilot<br/><i>HR lifecycle signal</i>]
+    Q1 -->|No| Q2{Entra ID risk<br/>level = HIGH?}
+
+    Q2 -->|Yes| BLOCK2[🚫 Block Copilot<br/><i>Identity risk signal</i>]
+    Q2 -->|No| Q3{Is user a<br/>guest/external identity?}
+
+    Q3 -->|Yes| Q3A{Guest has<br/>justified business need?}
+    Q3A -->|No| BLOCK3[🚫 Block Copilot<br/><i>External identity</i>]
+    Q3A -->|Yes| Q4
+
+    Q3 -->|No| Q4{Device compliant<br/>per Intune policy?}
+
+    Q4 -->|No| BLOCK4[🚫 Block Copilot<br/><i>Non-compliant device</i>]
+    Q4 -->|Yes| Q5{User has<br/>over-privileged access?}
+
+    Q5 -->|Yes| Q5A{Can permissions be<br/>scoped down first?}
+    Q5A -->|Yes| REMEDIATE[⚠️ Scope Down Permissions<br/><i>Then re-evaluate</i>]
+    Q5A -->|No| MONITOR[⚠️ Allow with<br/>Enhanced Monitoring]
+    REMEDIATE --> Q5
+
+    Q5 -->|No| Q6{All 6 posture<br/>checks passing?}
+
+    Q6 -->|No| WAIT[⏸️ Hold — Fix<br/>Posture Checks First]
+    Q6 -->|Yes| ALLOW[✅ Grant Copilot Access<br/><i>Standard monitoring applies</i>]
+
+    BLOCK1 & BLOCK2 & BLOCK3 & BLOCK4 --> LOG[📋 Log to Reco<br/>Update dynamic group]
+    ALLOW --> DETECT[Enable detection<br/>policies for user]
+    MONITOR --> DETECT
+
+    style BLOCK1 fill:#d63031,color:#fff
+    style BLOCK2 fill:#d63031,color:#fff
+    style BLOCK3 fill:#d63031,color:#fff
+    style BLOCK4 fill:#d63031,color:#fff
+    style ALLOW fill:#00b894,color:#fff
+    style MONITOR fill:#fdcb6e,color:#000
+    style REMEDIATE fill:#e17055,color:#fff
+    style WAIT fill:#636e72,color:#fff
+    style LOG fill:#2d3436,color:#fff
+    style DETECT fill:#0984e3,color:#fff
+    style START fill:#0078d4,color:#fff

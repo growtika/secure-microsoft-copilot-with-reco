@@ -1,5 +1,7 @@
 # Step 4: Detect Risky AI Usage Across the Environment
 
+[← Step 3](step-3-block-high-risk-users.md) | [Back to Overview](../README.md) | [Step 5 →](step-5-monitor-scope-drift.md)
+
 ## Overview
 
 Once Copilot is live, you need continuous visibility into how AI tools are being used across your environment. Indicators such as bulk data access, anomalous usage patterns, or attempts to surface sensitive information should be monitored closely and surfaced through detection policies as quickly as possible.
@@ -127,6 +129,45 @@ Alert Triggered
 ┌──────────────┐
 │     Low      │──▶ Weekly review batch
 └──────────────┘
+```
+
+## Alert Response Automation
+
+```mermaid
+sequenceDiagram
+    participant CP as Copilot Interaction
+    participant R as Reco Detection Engine
+    participant POL as Policy Evaluation
+    participant SOC as SOC Team
+    participant SOAR as SOAR Platform
+    participant CA as Conditional Access
+
+    CP->>R: Interaction metadata logged
+    R->>POL: Evaluate against all active policies
+
+    alt Bulk Data Access detected
+        POL->>SOC: HIGH alert — bulk file access
+        SOC->>SOC: Review within 4 hours
+        SOC->>CA: Optionally restrict user
+    end
+
+    alt Sensitive Content Surfaced
+        POL->>SOC: HIGH alert — confidential data in response
+        POL->>SOAR: Auto-log full interaction details
+    end
+
+    alt Cross-Boundary Access
+        POL->>SOC: CRITICAL alert — cross-tenant probe
+        POL->>SOAR: Auto-block Copilot for user
+        SOAR->>CA: Add user to restricted group
+        SOC->>SOC: Investigate within 15 minutes
+    end
+
+    alt Departing Employee Usage
+        POL->>SOC: HIGH alert — departing user active
+        POL->>SOAR: Auto-revoke Copilot license
+        SOAR->>CA: Enforce block immediately
+    end
 ```
 
 ## Next Step

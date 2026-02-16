@@ -1,0 +1,63 @@
+%% Permission Evaluation Flow
+%% How Copilot evaluates what data a user can access
+
+sequenceDiagram
+    participant U as End User
+    participant CA as Conditional Access<br/>(Entra ID)
+    participant CP as Microsoft Copilot
+    participant GR as Microsoft Graph<br/>(Permission Engine)
+    participant SP as SharePoint / OneDrive
+    participant DLP as Purview DLP
+    participant SL as Sensitivity Labels
+    participant R as Reco Platform
+    participant SOC as SOC Team
+
+    Note over U,SOC: Pre-Access: Identity & Device Validation
+
+    U->>CA: Authenticate & request Copilot
+    CA->>CA: Evaluate user risk level (Entra ID Protection)
+    CA->>CA: Check device compliance (Intune)
+    CA->>CA: Verify location policy
+
+    alt HIGH risk user or departing employee
+        CA-->>U: Access Denied
+        CA->>R: Log: blocked_access event
+        R->>R: Match against detection policies
+    else User passes all CA checks
+        CA-->>CP: Token issued with user context
+    end
+
+    Note over U,SOC: Query Phase: Data Discovery
+
+    U->>CP: Natural language query
+    CP->>GR: Resolve user effective permissions
+    GR->>SP: Enumerate accessible content
+    SP-->>GR: File list with metadata + sensitivity labels
+    GR-->>CP: Filtered results based on effective access
+
+    Note over U,SOC: Response Phase: Content Generation & Filtering
+
+    CP->>CP: Generate response from accessible content
+    CP->>DLP: Evaluate response against DLP policies
+    DLP->>SL: Check source file sensitivity labels
+
+    alt Sensitive content in response
+        DLP-->>CP: Block or redact content
+        DLP->>R: Alert: sensitive_content_surfaced
+        R->>SOC: Route alert per severity SLA
+    else Clean response
+        CP-->>U: Deliver Copilot response
+    end
+
+    Note over U,SOC: Post-Response: Monitoring & Detection
+
+    CP->>R: Log interaction metadata
+    R->>R: Evaluate: bulk access threshold?
+    R->>R: Evaluate: anomalous pattern?
+    R->>R: Evaluate: off-hours usage?
+    R->>R: Evaluate: cross-boundary access?
+
+    alt Detection policy triggered
+        R->>SOC: Generate alert with context
+        R->>R: Auto-response if configured
+    end
