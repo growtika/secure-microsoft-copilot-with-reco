@@ -1,131 +1,78 @@
 # Step 5: Monitor Permission Scope Drift
 
-[← Step 4](step-4-detect-risky-ai-usage.md) | [Back to Overview](../README.md) | [Governance →](ongoing-governance.md)
+[← Step 4](step-4-detect-risky-ai-usage.md) | [Back to Overview](../README.md)
 
 ## Overview
 
-Over time, Copilot's effective access can expand as plugins are connected, integrations evolve, and permission scopes change. What begins as a tightly controlled deployment can drift into broader data access if connected apps and delegated permissions are not reviewed continuously.
+Copilot's effective access expands silently as plugins are added and permission scopes change. What starts as `Files.Read` + `User.Read` can drift to `Mail.ReadWrite` + `Sites.ReadWrite.All` within months.
 
-## Navigation
+## What Causes Scope Drift
 
-**Reco Console:** `AI Governance → Connected AI Apps`
-
-## Understanding Scope Drift
-
-### What Causes Scope Drift
-
-1. **New plugin installations** — Each plugin may request additional OAuth scopes
-2. **Integration updates** — Vendors may expand requested permissions in updates
-3. **Admin consent grants** — Broad admin consent can silently expand access
-4. **Delegated permissions accumulation** — Users granting incremental access over time
-
-### The Scope Donut Chart
-
-The Reco dashboard visualizes permission distribution:
-
-```
-        ┌───────────────────┐
-        │  Permission Scope │
-        │    Distribution   │
-        │                   │
-        │    ┌─────────┐    │
-        │   ╱    Low    ╲   │      🟢 Low Risk Scopes
-        │  │  ┌───────┐  │  │      🟡 Medium Risk Scopes
-        │  │ │  High  │  │  │      🟠 High Risk Scopes
-        │  │ │  Risk  │  │  │      🔴 Critical Risk Scopes
-        │  │  └───────┘  │  │
-        │   ╲  Medium   ╱   │
-        │    └─────────┘    │
-        └───────────────────┘
-```
-
-- **Red and orange segments** highlight higher risk scopes
-- **'High Scopes to Review' count** shows how many permissions exceed expected boundaries
-- **Click any app** to view its individual plugins and revoke excessive scopes
+1. **New plugin installations** — each plugin may request additional OAuth scopes
+2. **Integration updates** — vendors may expand requested permissions
+3. **Admin consent grants** — broad admin consent silently expands access
+4. **Delegated permissions accumulation** — users granting incremental access over time
 
 ## What to Monitor
-
-### Connected App Inventory
 
 | Attribute | What to Check |
 |-----------|--------------|
 | App Name | Is this an approved application? |
-| Publisher | Is the publisher verified and trusted? |
-| Scopes Requested | Do scopes match the app's stated function? |
+| Publisher | Verified and trusted? |
+| Scopes Requested | Match the app's stated function? |
 | Consent Type | Admin consent vs. user consent |
-| Last Used | Is the app actively in use? |
+| Last Used | Inactive 90+ days → review for removal |
 | Users Count | How many users have consented? |
 
-### Permission Scope Risk Levels
+## Scope Risk Tiers
 
-| Risk Level | Example Scopes | Action |
-|------------|---------------|--------|
-| **Critical** | `Directory.ReadWrite.All`, `Mail.ReadWrite` | Immediate review and justification required |
-| **High** | `Files.ReadWrite.All`, `Sites.ReadWrite.All` | Review within 1 week |
-| **Medium** | `User.Read.All`, `Group.Read.All` | Quarterly review |
-| **Low** | `User.Read`, `profile` | Annual review |
+See [`scripts/scope_drift_monitor.py`](../scripts/scope_drift_monitor.py) for the full `SCOPE_RISK_MAP` and baseline comparison logic.
 
-## Remediation Actions
+| Risk | Example Scopes | Action |
+|------|---------------|--------|
+| **Critical** | `Directory.ReadWrite.All`, `Mail.ReadWrite`, `Mail.Send` | Immediate review |
+| **High** | `Files.ReadWrite.All`, `Sites.ReadWrite.All`, `Chat.ReadWrite.All` | Review within 1 week |
+| **Medium** | `User.Read.All`, `Group.Read.All`, `Directory.Read.All` | Quarterly review |
+| **Low** | `User.Read`, `profile`, `openid` | Annual review |
 
-### Revoke Excessive Scopes
+## Remediation
 
-When a connected app has more permissions than needed:
+**Excessive scopes:** Review individual plugin permissions → revoke unnecessary scopes → verify app functionality with reduced permissions.
 
-1. Navigate to the app details in Reco
-2. Review individual plugin permissions
-3. Revoke excessive scopes
-4. Verify app functionality with reduced permissions
-5. Document the change
-
-### Remove Unused Apps
-
-Apps that haven't been used in 90+ days should be reviewed for removal:
-
-1. Identify inactive connected apps
-2. Confirm with app owners that the integration is no longer needed
-3. Revoke all permissions
-4. Remove the app registration if appropriate
+**Unused apps (90+ days inactive):** Confirm with app owners → revoke all permissions → remove app registration if appropriate.
 
 ## Scope Drift Detection Flow
 
 ```mermaid
 graph TD
-    BASELINE[Establish scope baseline<br/><i>Day 1 of Copilot deployment</i>] --> MONITOR[Continuous monitoring<br/><i>Reco AI Governance</i>]
+    BASELINE[Establish scope baseline] --> MONITOR[Continuous monitoring]
 
     MONITOR --> CHECK{Scope change<br/>detected?}
 
     CHECK -->|No change| MONITOR
-    CHECK -->|New plugin installed| EVAL1[Evaluate new plugin scopes]
-    CHECK -->|Existing app scope expanded| EVAL2[Compare against baseline]
-    CHECK -->|Admin consent granted| EVAL3[Review admin consent scope]
-    CHECK -->|App inactive 90+ days| EVAL4[Flag for removal review]
+    CHECK -->|New plugin| EVAL1[Evaluate new scopes]
+    CHECK -->|Scope expanded| EVAL2[Compare against baseline]
+    CHECK -->|Admin consent granted| EVAL3[Review consent scope]
+    CHECK -->|App inactive 90+ days| EVAL4[Flag for removal]
 
-    EVAL1 --> RISK{Risk level of<br/>new scopes?}
-    EVAL2 --> RISK
-    EVAL3 --> RISK
+    EVAL1 & EVAL2 & EVAL3 --> RISK{Risk level?}
 
-    RISK -->|Critical / High| ALERT[Alert security team<br/>Immediate review]
-    RISK -->|Medium| QUEUE[Add to weekly<br/>review queue]
-    RISK -->|Low| LOG[Log and continue<br/>monitoring]
+    RISK -->|Critical / High| ALERT[Alert security team]
+    RISK -->|Medium| QUEUE[Weekly review queue]
+    RISK -->|Low| LOG[Log and monitor]
 
-    ALERT --> ACTION{Scopes<br/>justified?}
-    ACTION -->|Yes| APPROVE[Approve and update<br/>baseline]
-    ACTION -->|No| REVOKE[Revoke excessive<br/>scopes]
+    ALERT --> ACTION{Justified?}
+    ACTION -->|Yes| APPROVE[Update baseline]
+    ACTION -->|No| REVOKE[Revoke scopes]
 
-    EVAL4 --> REMOVE{App still<br/>needed?}
-    REMOVE -->|Yes| KEEP[Keep but review<br/>quarterly]
-    REMOVE -->|No| DELETE[Remove app<br/>registration]
+    EVAL4 --> REMOVE{Still needed?}
+    REMOVE -->|Yes| KEEP[Quarterly review]
+    REMOVE -->|No| DELETE[Remove app]
 
     APPROVE & REVOKE & LOG --> MONITOR
     KEEP & DELETE --> MONITOR
 
-    style BASELINE fill:#0984e3,color:#fff
     style ALERT fill:#d63031,color:#fff
     style REVOKE fill:#e17055,color:#fff
-    style DELETE fill:#636e72,color:#fff
     style APPROVE fill:#00b894,color:#fff
 ```
-
-## Next Step
-
-→ [Ongoing Governance](ongoing-governance.md)

@@ -1,20 +1,25 @@
 """
-Permission Audit Script for Microsoft 365 Copilot Security
+Permission Risk Classification for Microsoft 365 Copilot
 
-Identifies overshared files, sensitivity label conflicts, and permission
-inheritance issues before enabling Microsoft Copilot.
+Provides data models and risk classification logic for auditing M365
+permissions before enabling Copilot. This is a framework — not a
+turnkey scanner. To use it against your tenant, you need to:
 
-Prerequisites:
-    pip install msal requests
+1. Register an app in Microsoft Entra ID
+2. Grant Sites.Read.All and Files.Read.All application permissions
+3. Authenticate with MSAL and feed Graph API results into these models
 
-Usage:
-    python permission_audit.py --tenant-id YOUR_TENANT_ID
-    python permission_audit.py --tenant-id YOUR_TENANT_ID --output report.json
+The core value here is the risk classification logic (classify_risk)
+and the inheritance checker (check_inheritance_issues), which encode
+the sensitivity-label-vs-sharing-scope risk matrix from the guide.
+
+Graph API endpoints you'll need:
+    GET https://graph.microsoft.com/v1.0/sites?search=*
+    GET https://graph.microsoft.com/v1.0/sites/{id}/drive/root/children
+    GET https://graph.microsoft.com/v1.0/sites/{id}/drive/items/{id}?$select=sensitivityLabel
 """
 
-import argparse
 import json
-import sys
 from dataclasses import dataclass, field, asdict
 from enum import Enum
 from typing import Optional
@@ -29,10 +34,11 @@ class RiskLevel(Enum):
 
 @dataclass
 class PermissionFinding:
+    """A single permission issue found during audit."""
     file_path: str
     site: str
     sensitivity_label: Optional[str]
-    sharing_scope: str
+    sharing_scope: str  # "named_users", "team", "organization", "external", "anonymous"
     risk_level: RiskLevel
     issue: str
     remediation: str
@@ -45,193 +51,107 @@ class PermissionFinding:
 
 @dataclass
 class AuditReport:
+    """Collects findings and generates a summary."""
     tenant_id: str
     total_files_scanned: int = 0
     findings: list = field(default_factory=list)
-    summary: dict = field(default_factory=dict)
 
     def add_finding(self, finding: PermissionFinding):
         self.findings.append(finding)
 
-    def generate_summary(self):
-        self.summary = {
-            "total_findings": len(self.findings),
-            "critical": len([f for f in self.findings if f.risk_level == RiskLevel.CRITICAL]),
-            "high": len([f for f in self.findings if f.risk_level == RiskLevel.HIGH]),
-            "medium": len([f for f in self.findings if f.risk_level == RiskLevel.MEDIUM]),
-            "low": len([f for f in self.findings if f.risk_level == RiskLevel.LOW]),
-        }
-        return self.summary
-
-    def to_dict(self):
+    def summary(self) -> dict:
         return {
-            "tenant_id": self.tenant_id,
-            "total_files_scanned": self.total_files_scanned,
-            "summary": self.summary,
-            "findings": [f.to_dict() for f in self.findings],
+            "total_findings": len(self.findings),
+            "critical": sum(1 for f in self.findings if f.risk_level == RiskLevel.CRITICAL),
+            "high": sum(1 for f in self.findings if f.risk_level == RiskLevel.HIGH),
+            "medium": sum(1 for f in self.findings if f.risk_level == RiskLevel.MEDIUM),
+            "low": sum(1 for f in self.findings if f.risk_level == RiskLevel.LOW),
+            "copilot_ready": all(
+                f.risk_level not in (RiskLevel.CRITICAL, RiskLevel.HIGH)
+                for f in self.findings
+            ),
         }
+
+    def to_json(self, path: str):
+        with open(path, "w") as f:
+            json.dump({
+                "tenant_id": self.tenant_id,
+                "total_files_scanned": self.total_files_scanned,
+                "summary": self.summary(),
+                "findings": [f.to_dict() for f in self.findings],
+            }, f, indent=2)
 
 
 def classify_risk(sensitivity_label: Optional[str], sharing_scope: str) -> RiskLevel:
-    """Classify risk based on sensitivity label and sharing scope."""
+    """
+    Classify risk based on sensitivity label vs. sharing scope.
+
+    This implements the risk matrix from the guide:
+
+                        Named   Team    Org-Wide  External  Anonymous
+    Highly Confidential  LOW    MEDIUM   CRIT      CRIT      CRIT
+    Confidential         LOW    LOW      HIGH      CRIT      CRIT
+    Internal Only        LOW    LOW      LOW       HIGH      CRIT
+    General              LOW    LOW      LOW       MEDIUM    HIGH
+    """
+    broad = ("external", "anonymous")
     if sensitivity_label in ("Confidential", "Highly Confidential"):
-        if sharing_scope in ("external", "anonymous"):
+        if sharing_scope in broad:
             return RiskLevel.CRITICAL
         if sharing_scope == "organization":
-            return RiskLevel.HIGH
+            return RiskLevel.HIGH if sensitivity_label == "Confidential" else RiskLevel.CRITICAL
+        if sharing_scope == "team" and sensitivity_label == "Highly Confidential":
+            return RiskLevel.MEDIUM
     if sensitivity_label == "Internal Only":
-        if sharing_scope in ("external", "anonymous", "organization"):
+        if sharing_scope == "anonymous":
+            return RiskLevel.CRITICAL
+        if sharing_scope == "external":
+            return RiskLevel.HIGH
+    if sensitivity_label == "General":
+        if sharing_scope == "anonymous":
+            return RiskLevel.HIGH
+        if sharing_scope == "external":
             return RiskLevel.MEDIUM
     return RiskLevel.LOW
 
 
-def get_remediation(risk_level: RiskLevel, sharing_scope: str) -> str:
-    """Return remediation guidance based on risk level."""
-    remediations = {
-        RiskLevel.CRITICAL: "Revoke sharing immediately. Restrict to named users only.",
-        RiskLevel.HIGH: "Restrict sharing scope to named users or specific groups.",
-        RiskLevel.MEDIUM: "Review sharing scope and reduce to minimum required access.",
-        RiskLevel.LOW: "Monitor for drift. Include in quarterly access review.",
-    }
-    return remediations.get(risk_level, "Review and assess.")
-
-
 def check_inheritance_issues(site_permissions: dict) -> list:
     """
-    Check for permission inheritance breaks that could cause
-    individual files to have broader access than their parent folder.
+    Detect broken permission inheritance in SharePoint.
+
+    Input format (from your Graph API query):
+    {
+        "/sites/project/Shared Documents/Confidential": {
+            "access": ["Team A"],
+            "files": [
+                {"name": "report.docx", "access": ["Team A"]},
+                {"name": "budget.xlsx", "access": ["Everyone"]},  # broken
+            ]
+        }
+    }
+
+    Returns list of files where file-level access exceeds folder-level access.
     """
     issues = []
-    # In production, this would query SharePoint API for broken inheritance
-    # Example structure:
-    # {
-    #     "folder": "/sites/project/Shared Documents/Confidential",
-    #     "folder_access": ["Team A"],
-    #     "files": [
-    #         {"name": "report.docx", "access": ["Everyone"]},  # BROKEN
-    #     ]
-    # }
     for folder_path, folder_data in site_permissions.items():
         folder_access = set(folder_data.get("access", []))
         for file_info in folder_data.get("files", []):
             file_access = set(file_info.get("access", []))
-            if file_access - folder_access:
+            extra = file_access - folder_access
+            if extra:
                 issues.append({
                     "file": file_info["name"],
                     "folder": folder_path,
-                    "folder_access": list(folder_access),
-                    "file_access": list(file_access),
-                    "extra_access": list(file_access - folder_access),
+                    "folder_access": sorted(folder_access),
+                    "file_access": sorted(file_access),
+                    "extra_access": sorted(extra),
                 })
     return issues
 
 
-def run_audit(tenant_id: str, output_file: Optional[str] = None):
-    """Run the full permission audit."""
-    print(f"Starting permission audit for tenant: {tenant_id}")
-    print("=" * 60)
-
-    report = AuditReport(tenant_id=tenant_id)
-
-    # NOTE: In production, replace this with Microsoft Graph API calls:
-    #
-    # 1. Authenticate with MSAL:
-    #    app = msal.ConfidentialClientApplication(client_id, authority, client_credential)
-    #    token = app.acquire_token_for_client(scopes=["https://graph.microsoft.com/.default"])
-    #
-    # 2. Query SharePoint sites:
-    #    GET https://graph.microsoft.com/v1.0/sites?search=*
-    #
-    # 3. For each site, query drive items with sharing info:
-    #    GET https://graph.microsoft.com/v1.0/sites/{site-id}/drive/root/children
-    #
-    # 4. Check sensitivity labels:
-    #    GET https://graph.microsoft.com/v1.0/sites/{site-id}/drive/items/{item-id}
-    #    ?$select=sensitivityLabel,sharingInformation
-
-    print("\nAudit configuration:")
-    print(f"  Tenant ID: {tenant_id}")
-    print(f"  Output: {output_file or 'stdout'}")
-    print("\nTo run this audit against your tenant:")
-    print("  1. Register an app in Microsoft Entra ID")
-    print("  2. Grant Sites.Read.All and Files.Read.All permissions")
-    print("  3. Set environment variables:")
-    print("     export AZURE_CLIENT_ID=<your-client-id>")
-    print("     export AZURE_CLIENT_SECRET=<your-client-secret>")
-    print("     export AZURE_TENANT_ID=<your-tenant-id>")
-    print("\nExample findings (demo mode):")
-
-    # Demo findings to illustrate the output format
-    demo_findings = [
-        PermissionFinding(
-            file_path="/sites/finance/Shared Documents/Q4 Budget.xlsx",
-            site="Finance Team Site",
-            sensitivity_label="Confidential",
-            sharing_scope="organization",
-            risk_level=RiskLevel.HIGH,
-            issue="Confidential file shared with entire organization",
-            remediation="Restrict to Finance team members only",
-        ),
-        PermissionFinding(
-            file_path="/sites/hr/Shared Documents/Employee Records/salaries.xlsx",
-            site="HR Team Site",
-            sensitivity_label="Highly Confidential",
-            sharing_scope="external",
-            risk_level=RiskLevel.CRITICAL,
-            issue="Highly Confidential HR file has external sharing enabled",
-            remediation="Revoke external sharing immediately",
-        ),
-        PermissionFinding(
-            file_path="/sites/marketing/Shared Documents/Campaign Plan.pptx",
-            site="Marketing Team Site",
-            sensitivity_label="Internal Only",
-            sharing_scope="anonymous",
-            risk_level=RiskLevel.MEDIUM,
-            issue="Internal Only file accessible via anonymous link",
-            remediation="Remove anonymous link, restrict to named users",
-        ),
-    ]
-
-    for finding in demo_findings:
-        report.add_finding(finding)
-        icon = {"critical": "🔴", "high": "🟠", "medium": "🟡", "low": "🟢"}
-        print(f"\n  {icon[finding.risk_level.value]} [{finding.risk_level.value.upper()}] {finding.file_path}")
-        print(f"    Issue: {finding.issue}")
-        print(f"    Remediation: {finding.remediation}")
-
-    report.total_files_scanned = 3  # Demo value
-    summary = report.generate_summary()
-
-    print("\n" + "=" * 60)
-    print("AUDIT SUMMARY")
-    print(f"  Files scanned: {report.total_files_scanned}")
-    print(f"  Total findings: {summary['total_findings']}")
-    print(f"  Critical: {summary['critical']}")
-    print(f"  High: {summary['high']}")
-    print(f"  Medium: {summary['medium']}")
-    print(f"  Low: {summary['low']}")
-
-    if summary["critical"] > 0 or summary["high"] > 0:
-        print("\n⚠️  RECOMMENDATION: Do NOT enable Copilot until Critical and High findings are remediated.")
-    else:
-        print("\n✅ No Critical or High findings. Environment is ready for Copilot posture checks.")
-
-    if output_file:
-        with open(output_file, "w") as f:
-            json.dump(report.to_dict(), f, indent=2)
-        print(f"\nFull report saved to: {output_file}")
-
-
-def main():
-    parser = argparse.ArgumentParser(
-        description="Audit Microsoft 365 permissions before enabling Copilot"
-    )
-    parser.add_argument("--tenant-id", required=True, help="Microsoft 365 tenant ID")
-    parser.add_argument("--output", help="Output file path for JSON report")
-    args = parser.parse_args()
-
-    run_audit(args.tenant_id, args.output)
-
-
-if __name__ == "__main__":
-    main()
+REMEDIATION = {
+    RiskLevel.CRITICAL: "Revoke sharing immediately. Restrict to named users only.",
+    RiskLevel.HIGH: "Restrict sharing scope to named users or specific security groups.",
+    RiskLevel.MEDIUM: "Review sharing scope and reduce to minimum required access.",
+    RiskLevel.LOW: "Monitor for drift. Include in quarterly access review.",
+}

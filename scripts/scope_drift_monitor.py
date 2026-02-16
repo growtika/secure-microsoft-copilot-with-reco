@@ -1,19 +1,24 @@
 """
-Scope Drift Monitor for Connected AI Apps
+Scope Drift Monitor — OAuth Scope Risk Mapping for Connected AI Apps
 
-Monitors permission scope changes in connected AI applications
-to detect drift that could expand Copilot's effective data access.
+Maps Microsoft Graph API permission scopes to risk tiers and provides
+baseline comparison logic to detect when connected apps gain new
+permissions over time.
 
-Usage:
-    python scope_drift_monitor.py
-    python scope_drift_monitor.py --baseline baseline.json
-    python scope_drift_monitor.py --output drift_report.json
+This is a data model and comparison engine — not a turnkey scanner.
+To use it against your tenant, you need to:
+
+1. Register an app in Microsoft Entra ID
+2. Grant Application.Read.All permissions
+3. Query connected apps and their permission grants via Graph API
+
+Graph API endpoints you'll need:
+    GET https://graph.microsoft.com/v1.0/servicePrincipals
+    GET https://graph.microsoft.com/v1.0/oauth2PermissionGrants
 """
 
-import argparse
 import json
-from dataclasses import dataclass, field, asdict
-from datetime import datetime
+from dataclasses import dataclass, asdict
 from enum import Enum
 from typing import Optional
 
@@ -25,6 +30,11 @@ class ScopeRisk(Enum):
     LOW = "low"
 
 
+# Maps Microsoft Graph API permission scopes to risk tiers.
+# Critical = full read/write across tenant resources
+# High = broad data access (all files, all sites, all chats)
+# Medium = read-only broad access
+# Low = minimal / user-scoped
 SCOPE_RISK_MAP = {
     # Critical — full read/write across tenant
     "Directory.ReadWrite.All": ScopeRisk.CRITICAL,
@@ -54,15 +64,17 @@ SCOPE_RISK_MAP = {
 
 @dataclass
 class ConnectedApp:
+    """A connected AI app with its granted OAuth scopes."""
     app_id: str
     name: str
     publisher: str
     scopes: list
-    consent_type: str
+    consent_type: str  # "admin" or "user"
     last_used: str
     users_count: int
 
     def get_risk_level(self) -> ScopeRisk:
+        """Return the highest risk level across all granted scopes."""
         highest = ScopeRisk.LOW
         order = [ScopeRisk.LOW, ScopeRisk.MEDIUM, ScopeRisk.HIGH, ScopeRisk.CRITICAL]
         for scope in self.scopes:
@@ -72,6 +84,7 @@ class ConnectedApp:
         return highest
 
     def get_high_risk_scopes(self) -> list:
+        """Return scopes classified as HIGH or CRITICAL."""
         return [
             s for s in self.scopes
             if SCOPE_RISK_MAP.get(s, ScopeRisk.LOW) in (ScopeRisk.CRITICAL, ScopeRisk.HIGH)
@@ -80,8 +93,9 @@ class ConnectedApp:
 
 @dataclass
 class DriftFinding:
+    """A single scope drift issue found during baseline comparison."""
     app_name: str
-    finding_type: str  # "new_scope", "removed_scope", "new_app", "unused_app"
+    finding_type: str  # "new_scope", "removed_scope", "new_app", "removed_app"
     details: str
     risk: ScopeRisk
     remediation: str
@@ -93,12 +107,21 @@ class DriftFinding:
 
 
 def compare_baselines(current: list, baseline: list) -> list:
-    """Compare current app permissions against a stored baseline."""
+    """
+    Compare current app permissions against a stored baseline.
+
+    Args:
+        current: list of ConnectedApp objects (current state)
+        baseline: list of dicts from a previously saved baseline JSON
+
+    Returns:
+        list of DriftFinding objects describing what changed.
+    """
     findings = []
     baseline_map = {app["app_id"]: app for app in baseline}
     current_map = {app.app_id: app for app in current}
 
-    # Check for new apps
+    # New apps since baseline
     for app in current:
         if app.app_id not in baseline_map:
             findings.append(DriftFinding(
@@ -110,7 +133,7 @@ def compare_baselines(current: list, baseline: list) -> list:
             ))
             continue
 
-        # Check for new scopes
+        # Scope expansion on existing apps
         old_scopes = set(baseline_map[app.app_id].get("scopes", []))
         new_scopes = set(app.scopes) - old_scopes
         if new_scopes:
@@ -128,7 +151,7 @@ def compare_baselines(current: list, baseline: list) -> list:
                 remediation="Review whether new scopes are justified. Revoke if excessive.",
             ))
 
-    # Check for unused apps
+    # Apps removed since baseline
     for app_id, app_data in baseline_map.items():
         if app_id not in current_map:
             findings.append(DriftFinding(
@@ -142,106 +165,13 @@ def compare_baselines(current: list, baseline: list) -> list:
     return findings
 
 
-def run_monitor(baseline_file: Optional[str] = None, output_file: Optional[str] = None):
-    """Run scope drift monitoring."""
-    print("Copilot Connected App Scope Drift Monitor")
-    print("=" * 60)
-    print()
-
-    # In production, query Microsoft Graph API:
-    # GET https://graph.microsoft.com/v1.0/servicePrincipals
-    # GET https://graph.microsoft.com/v1.0/oauth2PermissionGrants
-
-    demo_apps = [
-        ConnectedApp(
-            app_id="app-001",
-            name="Copilot for Microsoft 365",
-            publisher="Microsoft",
-            scopes=["Files.Read.All", "Sites.Read.All", "User.Read", "Chat.ReadWrite.All"],
-            consent_type="admin",
-            last_used="2026-01-22",
-            users_count=150,
-        ),
-        ConnectedApp(
-            app_id="app-002",
-            name="Third-Party AI Plugin",
-            publisher="ExampleVendor",
-            scopes=["Files.ReadWrite.All", "Mail.ReadWrite", "User.Read.All"],
-            consent_type="admin",
-            last_used="2026-01-20",
-            users_count=45,
-        ),
-        ConnectedApp(
-            app_id="app-003",
-            name="Analytics Dashboard",
-            publisher="AnalyticsCo",
-            scopes=["User.Read", "Directory.Read.All"],
-            consent_type="user",
-            last_used="2025-10-15",
-            users_count=3,
-        ),
-    ]
-
-    print("Connected AI Apps:")
-    print()
-
-    risk_icons = {
-        ScopeRisk.CRITICAL: "🔴",
-        ScopeRisk.HIGH: "🟠",
-        ScopeRisk.MEDIUM: "🟡",
-        ScopeRisk.LOW: "🟢",
-    }
-
-    high_scopes_to_review = 0
-
-    for app in demo_apps:
-        risk = app.get_risk_level()
-        high_risk = app.get_high_risk_scopes()
-        high_scopes_to_review += len(high_risk)
-
-        print(f"  {risk_icons[risk]} {app.name} (by {app.publisher})")
-        print(f"    Consent: {app.consent_type} | Users: {app.users_count} | Last used: {app.last_used}")
-        print(f"    Scopes ({len(app.scopes)}):")
-        for scope in app.scopes:
-            scope_risk = SCOPE_RISK_MAP.get(scope, ScopeRisk.LOW)
-            print(f"      {risk_icons[scope_risk]} {scope}")
-        if high_risk:
-            print(f"    ⚠️  High-risk scopes to review: {', '.join(high_risk)}")
-        print()
-
-    print(f"High Scopes to Review: {high_scopes_to_review}")
-    print()
-
-    # Check for unused apps (90+ days)
-    unused = [a for a in demo_apps if a.last_used < "2025-11-01"]
-    if unused:
-        print("⚠️  Unused apps (90+ days inactive):")
-        for app in unused:
-            print(f"    - {app.name} (last used: {app.last_used})")
-        print()
-
-    if output_file:
-        output = {
-            "scan_date": datetime.now().isoformat(),
-            "apps": [asdict(a) for a in demo_apps],
-            "high_scopes_to_review": high_scopes_to_review,
-            "unused_apps": [a.name for a in unused],
-        }
-        with open(output_file, "w") as f:
-            json.dump(output, f, indent=2)
-        print(f"Report saved to: {output_file}")
+def save_baseline(apps: list, path: str):
+    """Save current app state as a baseline JSON file."""
+    with open(path, "w") as f:
+        json.dump([asdict(app) for app in apps], f, indent=2)
 
 
-def main():
-    parser = argparse.ArgumentParser(
-        description="Monitor permission scope drift in connected AI apps"
-    )
-    parser.add_argument("--baseline", help="Path to baseline JSON for comparison")
-    parser.add_argument("--output", help="Output file path for JSON report")
-    args = parser.parse_args()
-
-    run_monitor(args.baseline, args.output)
-
-
-if __name__ == "__main__":
-    main()
+def load_baseline(path: str) -> list:
+    """Load a previously saved baseline JSON file."""
+    with open(path) as f:
+        return json.load(f)
